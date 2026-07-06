@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kafa Voleybolu 🏐</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three/build/three.module.js",
+        "cannon-es": "/vendor/cannon-es/dist/cannon-es.js",
+        "socket.io-client": "/socket.io/socket.io.esm.min.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="scoreboard">
+      <span class="badge red">KIRMIZI</span>
+      <span id="score">0 — 0</span>
+      <span class="badge blue">MAVİ</span>
+    </div>
+    <div id="msg" class="hidden"></div>
+  </div>
+
+  <!-- Duraklatma (tek oyunculu) -->
+  <div id="pause" class="hidden">
+    <div class="menu-card">
+      <h1 class="title" style="font-size: 36px;">⏸️ Duraklatıldı</h1>
+      <button id="btn-resume" class="big-btn">▶️ Devam Et</button>
+      <button id="btn-pause-menu" class="big-btn alt">🏠 Menüye Dön</button>
+    </div>
+  </div>
+
+  <!-- Ana Menü -->
+  <div id="menu">
+    <div class="menu-card">
+      <h1 class="title">🏐 Kafa Voleybolu</h1>
+      <p class="subtitle">Zıpla, kafa at, rakibi alt et!</p>
+      <input id="player-name" maxlength="12" placeholder="Adını gir (zorunlu)" autocomplete="off" />
+      <div id="name-id"></div>
+      <button id="btn-single" class="big-btn">🎮 Singleplayer</button>
+      <button id="btn-quick" class="big-btn alt">⚡ Hızlı Eşleşme</button>
+      <button id="btn-room" class="big-btn alt">🚪 Arkadaşınla Oda Kur</button>
+      <div id="menu-status"></div>
+    </div>
+  </div>
+
+  <!-- Oda alt-menüsü (kur / katıl) -->
+  <div id="room-menu" class="hidden">
+    <div class="menu-card">
+      <h1 class="title" style="font-size: 30px;">🚪 Oda</h1>
+      <button id="btn-create" class="big-btn">🏠 Oda Kur</button>
+      <div class="divider">— veya kodla katıl —</div>
+      <div class="join-row">
+        <input id="join-code" maxlength="4" placeholder="KOD" autocomplete="off" />
+        <button id="btn-join" class="big-btn alt small">Katıl</button>
+      </div>
+      <div id="room-status"></div>
+      <button id="btn-room-back" class="big-btn alt">← Geri</button>
+    </div>
+  </div>
+
+  <!-- Maç Sonu -->
+  <div id="end" class="hidden">
+    <div class="menu-card">
+      <h1 id="end-title">🏆</h1>
+      <button id="btn-rematch" class="big-btn">🔄 Yeni Maç</button>
+      <button id="btn-menu" class="big-btn alt">🏠 Menüye Dön</button>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
