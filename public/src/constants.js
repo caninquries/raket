@@ -5,8 +5,9 @@ export const COURT = {
   halfLenX: 13,     // sahanın yarı uzunluğu (file X=0'da) — dev top/rakete göre uzatıldı
   halfWidZ: 8.5,    // sahanın yarı genişliği
   wallX: 16.5,      // görünmez duvarlar (top hep oyunda kalsın)
-  wallZ: 10.5,
+  wallZ: 12,        // çizgilere uzaklık x ile EŞİT (16.5-13 = 12-8.5 = 3.5)
   ceilY: 15,
+  fenceH: 7.5,      // görsel file-duvar yüksekliği (üst tamamen açık)
   netHeight: 2.35,
   netThickness: 0.12,
   lineWidth: 0.12,
@@ -21,8 +22,8 @@ export const PLAYER = {
   landRecoverTime: 1.0, // zıplama inişinden sonra yerde baygın kalma süresi
   minX: 0.7,         // fileye en fazla bu kadar yaklaşabilir
   maxX: 16,
-  maxZ: 9.8,
-  spawnX: 7.5,       // raund başı dizilme mesafesi (servis noktasından biraz geride)
+  maxZ: 11.5,
+  spawnX: 11,        // raund başı dizilme mesafesi — ARKA ÇİZGİ (servis buradan)
   hitCooldown: 0.25,
   hitPower: 11,
   smashBonus: 5,
@@ -40,6 +41,12 @@ export const BALL = {
   maxSpeed: 28,          // fiziksel raket vuruşları çok sert olabilir
   serveHeight: 9,
   serveX: 5,
+  // Sınır sekmesi mesafeye bağlı: yakından vurunca enerjik sekme (karşıya geçer),
+  // uzaktan gelince sönümlü (sınırda kalır). vuruştan bu yana gidilen mesafeye göre.
+  wallCloseDist: 3,      // <= bu mesafe: tam sekme (bank pas)
+  wallFarDist: 17,       // >= bu mesafe: sönümlü sekme
+  wallBounceNear: 1.0,   // yakın çarpış sekme çarpanı (fizik restitüsyonu korunur)
+  wallBounceFar: 0.28,   // uzak çarpış sekme çarpanı (enerji baya düşer)
 };
 
 // Dev raket: kafası topla aynı boyutta, GERÇEK fizik yüzeyi.
@@ -56,6 +63,7 @@ export const RACKET = {
   throwUp: 0.5,       // fırlatmanın yukarı bileşeni (kavis)
   returnDelay: 1.0,   // raket YERDE DURDUKTAN sonra ele dönmeden önceki bekleme (sn)
   returnDur: 0.35,    // ele dönüş animasyon süresi (sn)
+  serveHoldTime: 3.5, // SERVİSTE topu diskte tutma sınırı — dolunca otomatik atış
 };
 
 export const PHYS_STEP = 1 / 120;

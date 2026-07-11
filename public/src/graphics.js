@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { COURT, TEAM_COLORS } from './constants.js';
 
 const SKY_BLUE = 0x87ceeb;
+const GRASS = 0x57a63f;      // saha dışı çim yeşili
+const COURT_BLUE = 0x1e6fb2; // sahanın koyu mavisi
 
 // Sahne, kamera, ışıklar, saha, file, bulutlar
 export function createGraphics(container, sideSign, teamNames = ['KIRMIZI', 'MAVİ']) {
@@ -28,7 +30,8 @@ export function createGraphics(container, sideSign, teamNames = ['KIRMIZI', 'MAV
   scene.add(hemi);
 
   const sun = new THREE.DirectionalLight(0xfff2d8, 2.6);
-  sun.position.set(10, 20, 8);
+  let sunAngle = Math.atan2(8, 10); // başlangıç azimutu (eski konumla aynı)
+  sun.position.set(Math.cos(sunAngle) * 16, 20, Math.sin(sunAngle) * 16);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.left = -26;
@@ -39,18 +42,30 @@ export function createGraphics(container, sideSign, teamNames = ['KIRMIZI', 'MAV
   sun.shadow.bias = -0.0004;
   scene.add(sun);
 
-  // Zemin — gökyüzüyle aynı mavi
+  // Zemin — saha DIŞI her yer çim yeşili
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(140, 140),
-    new THREE.MeshStandardMaterial({ color: SKY_BLUE, roughness: 1, metalness: 0 })
+    new THREE.PlaneGeometry(220, 220),
+    new THREE.MeshStandardMaterial({ color: GRASS, roughness: 1, metalness: 0 })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
+  // Saha zemini — koyu mavi, kafesin içini kaplar (çim üstünde)
+  const court = new THREE.Mesh(
+    new THREE.PlaneGeometry(COURT.wallX * 2, COURT.wallZ * 2),
+    new THREE.MeshStandardMaterial({ color: COURT_BLUE, roughness: 0.95, metalness: 0 })
+  );
+  court.rotation.x = -Math.PI / 2;
+  court.position.y = 0.006;
+  court.receiveShadow = true;
+  scene.add(court);
+
   buildCourtLines(scene);
   buildNet(scene);
-  buildSunDisk(scene, sideSign);
+  buildFence(scene);       // sahayı yanlardan saran yeşil tel örgü (üst açık)
+  buildBushes(scene);      // saha dışı çalılar/çim öbekleri
+  const sunSprite = buildSunDisk(scene, sideSign);
   buildTeamBoards(scene, teamNames);
   const clouds = buildClouds(scene);
   const throwPreview = buildThrowPreview(scene);
@@ -68,6 +83,13 @@ export function createGraphics(container, sideSign, teamNames = ['KIRMIZI', 'MAV
     scene,
     camera,
     clouds,
+    // Güneş yavaşça döner: gölgelerin yönü/şekli oyun boyunca değişir
+    updateSun(dt) {
+      sunAngle += dt * 0.012; // tam tur ~8.7 dakika
+      sun.position.set(Math.cos(sunAngle) * 16, 20, Math.sin(sunAngle) * 16);
+      // Gökyüzündeki güneş görseli de aynı azimutta süzülsün
+      sunSprite.position.set(Math.cos(sunAngle) * 52, 25, Math.sin(sunAngle) * 52);
+    },
     // Raket fırlatma yörünge önizlemesi: noktalar [x,y,z,x,y,z,...]
     showThrowPreview(pts) {
       const n = Math.floor(pts.length / 3);
@@ -195,6 +217,133 @@ function buildNet(scene) {
   scene.add(netMesh);
 }
 
+// Çevre çiti: tenis kortu tipi İNCE tel örgü (chain-link), çalı yeşili renkte.
+// Yarı yükseklik, üst tamamen açık; örgü delikli GÖLGE düşürür.
+const FENCE_GREEN = '#3f8a34';      // çalı yeşiliyle birebir aynı
+const FENCE_POST_GREEN = 0x2c5f24;  // direkler biraz koyu
+function buildFence(scene) {
+  const X = COURT.wallX, Z = COURT.wallZ, H = COURT.fenceH;
+  const postMat = new THREE.MeshStandardMaterial({ color: FENCE_POST_GREEN, roughness: 0.6, metalness: 0.3 });
+
+  // Tel örgü duvar (ince baklava desen, delikli gölgeli)
+  const addWall = (w, cx, cz, rotY) => {
+    const t = makeChainLinkTexture();
+    // İnce örgü: ~0.4m'de bir baklava hücresi
+    t.repeat.set(Math.max(8, Math.round(w / 0.4)), Math.max(8, Math.round(H / 0.4)));
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, H),
+      new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide, depthWrite: false, alphaTest: 0.15 })
+    );
+    m.position.set(cx, H / 2, cz);
+    m.rotation.y = rotY;
+    m.castShadow = true;
+    // Delikli gölge: derinlik materyali de aynı örgü dokusunu kullansın
+    m.customDepthMaterial = new THREE.MeshDepthMaterial({
+      depthPacking: THREE.RGBADepthPacking, map: t, alphaTest: 0.4,
+    });
+    scene.add(m);
+  };
+  addWall(Z * 2, X, 0, Math.PI / 2);   // +x duvar
+  addWall(Z * 2, -X, 0, Math.PI / 2);  // -x duvar
+  addWall(X * 2, 0, Z, 0);             // +z duvar
+  addWall(X * 2, 0, -Z, 0);            // -z duvar
+
+  // Direkler: köşeler + uzun kenarların ortaları (görseldeki gibi)
+  const posts = [
+    [X, Z], [X, -Z], [-X, Z], [-X, -Z], // köşeler
+    [0, Z], [0, -Z],                     // uzun kenar ortaları
+    [X, 0], [-X, 0],                     // kısa kenar ortaları
+  ];
+  for (const [cx, cz] of posts) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, H + 0.15, 10), postMat);
+    post.position.set(cx, (H + 0.15) / 2, cz);
+    post.castShadow = true;
+    scene.add(post);
+  }
+  // Üst boru (tenis kortu çitlerindeki gibi ince ray)
+  const rails = [
+    { w: X * 2, x: 0, z: Z, rotY: 0 }, { w: X * 2, x: 0, z: -Z, rotY: 0 },
+    { w: Z * 2, x: X, z: 0, rotY: Math.PI / 2 }, { w: Z * 2, x: -X, z: 0, rotY: Math.PI / 2 },
+  ];
+  for (const r of rails) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(r.w, 0.09, 0.09), postMat);
+    rail.position.set(r.x, H, r.z);
+    rail.rotation.y = r.rotY;
+    rail.castShadow = true;
+    scene.add(rail);
+  }
+}
+
+// Tenis kortu tel örgüsü: ince baklava (chain-link) deseni, çalı yeşili
+function makeChainLinkTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, 64, 64);
+  g.strokeStyle = FENCE_GREEN;
+  g.lineWidth = 4;
+  // Baklava deseni: çapraz iki yönlü teller (kenarlardan taşarak dikişsiz döşenir)
+  g.beginPath();
+  g.moveTo(-32, 32); g.lineTo(32, -32);
+  g.moveTo(0, 64); g.lineTo(64, 0);
+  g.moveTo(32, 96); g.lineTo(96, 32);
+  g.moveTo(-32, 32); g.lineTo(32, 96);
+  g.moveTo(0, 0); g.lineTo(64, 64);
+  g.moveTo(32, -32); g.lineTo(96, 32);
+  g.stroke();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// Saha dışı çalılar ve çim öbekleri (çim yeşilinin üstünde)
+function buildBushes(scene) {
+  const rng = mulberry32(1337);
+  const bushMat = new THREE.MeshStandardMaterial({ color: 0x3f8a34, roughness: 1, flatShading: true });
+  const bushMat2 = new THREE.MeshStandardMaterial({ color: 0x4fa441, roughness: 1, flatShading: true });
+  const tuftMat = new THREE.MeshStandardMaterial({ color: 0x5bb04a, roughness: 1, flatShading: true });
+
+  // Çalılar: birkaç küreden oluşan öbekler, kafesin dışına serpiştirilir
+  for (let i = 0; i < 26; i++) {
+    const group = new THREE.Group();
+    const puffs = 2 + Math.floor(rng() * 3);
+    for (let p = 0; p < puffs; p++) {
+      const r = 0.9 + rng() * 1.3;
+      const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), rng() < 0.5 ? bushMat : bushMat2);
+      puff.position.set((rng() - 0.5) * 2.2, r * 0.55, (rng() - 0.5) * 2.2);
+      puff.scale.y = 0.8;
+      puff.castShadow = true;
+      group.add(puff);
+    }
+    placeOutside(group, rng);
+    scene.add(group);
+  }
+
+  // Çim öbekleri: küçük yeşil koniler
+  for (let i = 0; i < 40; i++) {
+    const tuft = new THREE.Group();
+    for (let b = 0; b < 4; b++) {
+      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.7 + rng() * 0.4, 4), tuftMat);
+      blade.position.set((rng() - 0.5) * 0.5, 0.35, (rng() - 0.5) * 0.5);
+      blade.rotation.z = (rng() - 0.5) * 0.4;
+      tuft.add(blade);
+    }
+    placeOutside(tuft, rng);
+    scene.add(tuft);
+  }
+}
+
+// Nesneyi kafesin dışına, çim alanına rastgele yerleştir
+function placeOutside(obj, rng) {
+  let x, z;
+  do {
+    x = (rng() - 0.5) * 90;
+    z = (rng() - 0.5) * 70;
+  } while (Math.abs(x) < COURT.wallX + 2.5 && Math.abs(z) < COURT.wallZ + 2.5);
+  obj.position.set(x, 0, z);
+  obj.rotation.y = rng() * Math.PI * 2;
+}
+
 // Güneş — her iki kameradan da görünür şekilde sahanın karşısında
 function buildSunDisk(scene, sideSign) {
   const cv = document.createElement('canvas');
@@ -211,6 +360,7 @@ function buildSunDisk(scene, sideSign) {
   sprite.scale.set(13, 13, 1);
   sprite.position.set(-sideSign * 48, 26, -20);
   scene.add(sprite);
+  return sprite;
 }
 
 // Saha dışı takım panoları: her takımın çok arkasında, uzun beyaz direğin
@@ -238,8 +388,9 @@ function buildTeamBoards(scene, names) {
     frame.castShadow = true;
     scene.add(frame);
 
-    // LED ekran — isim yeşil ışık gibi yanar
-    const tex = makeLedTexture(names[team] || (team === 0 ? 'KIRMIZI' : 'MAVİ'));
+    // Ekran — isim TAKIM RENGİNDE (kırmızı/mavi), parlamasız
+    const teamColor = '#' + TEAM_COLORS[team].toString(16).padStart(6, '0');
+    const tex = makeLedTexture(names[team] || (team === 0 ? 'KIRMIZI' : 'MAVİ'), teamColor);
     const screen = new THREE.Mesh(
       new THREE.PlaneGeometry(boardW, boardH),
       new THREE.MeshBasicMaterial({ map: tex }) // MeshBasic: kendi ışığı gibi parlak
@@ -252,7 +403,7 @@ function buildTeamBoards(scene, names) {
   }
 }
 
-function makeLedTexture(name) {
+function makeLedTexture(name, color = '#ffffff') {
   const cv = document.createElement('canvas');
   cv.width = 768;
   cv.height = 256;
@@ -265,17 +416,12 @@ function makeLedTexture(name) {
   for (let y = 6; y < cv.height; y += 12) {
     for (let x = 6; x < cv.width; x += 12) g.fillRect(x, y, 2, 2);
   }
-  // İsim — yeşil led, parlama efektiyle
+  // İsim — takım renginde, parlamasız (düz dolgu)
   const text = String(name).slice(0, 12).toUpperCase();
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   g.font = 'bold 150px "Baloo 2", Arial, sans-serif';
-  g.shadowColor = '#39ff14';
-  g.shadowBlur = 42;
-  g.fillStyle = '#7dff5a';
-  g.fillText(text, cv.width / 2, cv.height / 2 + 8);
-  g.shadowBlur = 16;
-  g.fillStyle = '#c6ffb0';
+  g.fillStyle = color;
   g.fillText(text, cv.width / 2, cv.height / 2 + 8);
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;

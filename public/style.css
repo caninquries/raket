@@ -102,14 +102,6 @@ html, body {
 #player-name:focus { border-color: #55b6ff; }
 #player-name.invalid { border-color: #ff6b6b; background: #fff0f0; }
 
-#name-id {
-  font-size: 12px;
-  font-weight: 700;
-  color: #7ba3bd;
-  letter-spacing: 1px;
-  margin-top: -6px;
-}
-
 #room-status {
   font-size: 17px;
   font-weight: 700;

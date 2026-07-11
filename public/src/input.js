@@ -23,6 +23,7 @@ export class Input {
       f: (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0),
       r: (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0),
       jump: k.has('Space'),
+      sprint: k.has('ShiftLeft'), // sol shift: %50 hızlanma
     };
   }
 

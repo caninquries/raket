@@ -37,6 +37,7 @@ export class Character {
     this.holdPitch = 0.5;    // dish yüksekliği için nişan (fare) değeri
     this.racketCooldownUntil = 0;   // bu ana kadar raket topa vuramaz (tekrar-vuruş engeli)
     this._racketTouchedSwing = false;
+    this._opacity = 1;          // yakın kamerada kendi karakterini soldurmak için
     this.racketState = 'held';  // 'held' | 'flying' | 'returning'
     this._rightArmFree = false; // fırlatınca sağ kol serbest sarkaç olur
     this._restTimer = 0;        // uçan raketin durgun geçirdiği süre
@@ -527,6 +528,21 @@ export class Character {
     this.racketPivot.rotation.x += (-0.6 - this.racketPivot.rotation.x) * Math.min(1, 8 * dt);
   }
 
+  // Servis hazırlığı: karakteri fileye döndür, dish pozunu HEMEN uygula ve
+  // topun oturacağı disk-üstü noktayı döndür (top raund başında burada hazır durur)
+  prepareServeDish(out) {
+    this.yaw = Math.atan2(-this.side, 0); // fileye bak
+    this.group.position.copy(this.body.position);
+    this.group.quaternion.setFromAxisAngle(_up, this.yaw);
+    this.wantHold = true;
+    this.holdPose = true;
+    this._applyHoldPose();
+    this.group.updateMatrixWorld(true);
+    this.racketHead.getWorldPosition(out);
+    out.y += BALL.radius + 0.05;
+    return out;
+  }
+
   // Dish pozu: disk YUKARI baksın ve karakterin ÖNÜNDE SABİT dursun (topu ortasında taşır).
   // Kameradan bağımsız — sağ kol omuzdan sapa uzanır (görsel arm koduyla yerleşir).
   _applyHoldPose() {
@@ -867,6 +883,27 @@ export class Character {
     }
     rb.position.set(_v1.x, _v1.y, _v1.z);
     rb.quaternion.set(_q1.x, _q1.y, _q1.z, _q1.w);
+  }
+
+  // Kamera yaklaşınca kendi karakterini kademeli soldur (yalnızca yerel görünüm).
+  // Elde raket (group içindeki racketPivot) da solar; fırlatılmış raket etkilenmez.
+  setOpacity(o) {
+    o = Math.max(0, Math.min(1, o));
+    if (Math.abs((this._opacity ?? 1) - o) < 0.01) return;
+    this._opacity = o;
+    const transparent = o < 0.995;
+    const shadow = o > 0.4;
+    const apply = (root) => {
+      root.traverse((n) => {
+        if (!n.isMesh || !n.material) return;
+        n.castShadow = shadow;
+        const mats = Array.isArray(n.material) ? n.material : [n.material];
+        for (const m of mats) { m.transparent = transparent; m.opacity = o; }
+      });
+    };
+    apply(this.group); // gövde, kafa, bacaklar, omuzlar + elde raket (racketPivot)
+    for (const m of this.armMeshes) apply(m);
+    for (const m of this.handMeshes) apply(m);
   }
 
   dispose() {

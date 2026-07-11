@@ -20,8 +20,11 @@ export class Game {
     this.ui = ui;
     this.container = container;
 
-    this.myTeam = mode === 'guest' ? 1 : 0;
+    // Takım: multiplayer'da host=0/guest=1 (protokol); singleplayer'da %50-%50 rastgele
+    this.myTeam = mode === 'guest' ? 1 : (mode === 'single' ? (Math.random() < 0.5 ? 0 : 1) : 0);
+    this.botTeam = 1 - this.myTeam;
     this.authority = mode !== 'guest';
+    this._serveHold = null; // { side, until } — servis dish tutuşu (3.5 sn sınırı)
 
     this.scores = [0, 0];
     this.roundActive = false;
@@ -50,7 +53,7 @@ export class Game {
     this._setupHitDetection();
 
     this.input = new Input();
-    this.bot = mode === 'single' ? new Bot(this.chars[1], this.ball) : null;
+    this.bot = mode === 'single' ? new Bot(this.chars[this.botTeam], this.ball) : null;
 
     if (this.net) this._setupNet();
 
@@ -165,6 +168,19 @@ export class Game {
       if (this.paused) return;
       if (e.button === 0) {
         this._holdingLeft = true;
+        // SERVİS tutuşundaysam: sol tık = servis atışı (baktığım yöne).
+        // Top henüz diske düşmediyse tık yok sayılır (pencere iptal olmasın).
+        if (this._serveHold && this._serveHold.side === this.myTeam) {
+          if (this.me._cradling && !this.me.flopped) {
+            if (this.authority) {
+              this._serveLaunch(this.me);
+            } else {
+              this._sendEvent({ type: 'serveShoot' });
+              this._serveLaunch(this.me); // yerel tahmin — host onaylar
+            }
+          }
+          return;
+        }
         this.me.startSwing();
       } else if (e.button === 2 && this.me.racketState === 'held' && !this.me.flopped && !this.me.holdPose) {
         this._aiming = true; // dish modunda (holdPose) fırlatma nişanı açılmaz
@@ -251,24 +267,38 @@ export class Game {
   _updateBallCradle(dt) {
     const bb = this.ball.body;
     for (const c of this.chars) {
+      // Guest yalnızca KENDİ karakteri için tahmin yürütür (top host'tan düzeltilir)
+      if (!this.authority && c !== this.me) continue;
       const wasCradling = c._cradling;
       c._cradling = false;
+      const isServe = this._serveHold && this._serveHold.side === c.team;
       if (!c.holdPose) {
         // Sol tık bırakıldı: topu diskte tutuyorduysak baktığı yöne + yukarı FIRLAT
-        if (wasCradling) this._launchFromDish(c);
+        // (servis tutuşu flop/zıplamayla bozulduysa fırlatma — top düşsün)
+        if (wasCradling && !isServe) this._launchFromDish(c);
         c._cradleT = 0;
         continue;
       }
       // Atıştan hemen sonra topu tekrar yakalama (kaçabilsin)
       if (this._time < (c._cradleReleaseUntil || 0)) { c._cradleT = 0; continue; }
+      // Guest: host topu fırlattıysa (hız yüksek) beşiğe geri çekme
+      if (!this.authority && !wasCradling && bb.velocity.length() > 10) { c._cradleT = 0; continue; }
       c.racketHead.getWorldPosition(this._cradlePos);
       // Disk yukarı bakıyor: dinlenme noktası diskin biraz üstünde
       const rx = this._cradlePos.x, ry = this._cradlePos.y + BALL.radius + 0.05, rz = this._cradlePos.z;
       const dx = rx - bb.position.x, dy = ry - bb.position.y, dz = rz - bb.position.z;
       if (Math.hypot(dx, dy, dz) > BALL.radius * 2.2) { c._cradleT = 0; continue; } // top diskte değil
-      // 2 saniye maksimum tutma: süre dolunca OTOMATİK atış + kısa süre topu bırak
       c._cradleT = (c._cradleT || 0) + dt;
-      if (c._cradleT >= 2) {
+      if (isServe) {
+        // SERVİS: 3.5 sn sınırı (top yakalanınca başlar); bot ~1.2 sn'de servis atar
+        if (this._serveHold.until === null) this._serveHold.until = this._time + RACKET.serveHoldTime;
+        const botServing = this.bot && c.team === this.botTeam;
+        if (this.authority && (this._time >= this._serveHold.until || (botServing && c._cradleT >= 1.2))) {
+          this._serveLaunch(c);
+          continue;
+        }
+      } else if (c._cradleT >= 2) {
+        // Normal dish: 2 saniye sınırı
         this._launchFromDish(c);
         c._cradleT = 0;
         c._cradleReleaseUntil = this._time + 0.6;
@@ -283,6 +313,15 @@ export class Game {
       c._cradling = true;
       break; // aynı anda tek disk taşır
     }
+  }
+
+  // Servis atışı: fırlat + servis tutuşunu kapat (guest'e bildir)
+  _serveLaunch(c) {
+    this._launchFromDish(c);
+    this._serveHold = null;
+    c._cradleT = 0;
+    c._cradleReleaseUntil = this._time + 0.6;
+    if (this.authority) this._sendEvent({ type: 'serveDone' });
   }
 
   // Dish'ten bırakınca: topu karakterin baktığı yöne kavisle fırlat (servis/pas)
@@ -367,15 +406,29 @@ export class Game {
     let mz = fwdZ * rawIn.f + fwdX * rawIn.r;
     const mLen = Math.hypot(mx, mz);
     if (mLen > 1) { mx /= mLen; mz /= mLen; }
+    if (rawIn.sprint) { mx *= 1.5; mz *= 1.5; } // sol shift: %50 hızlanma
     this.me.faceYaw = Math.atan2(fwdX, fwdZ); // karakter fare-bakış yönüne döner
     this.me.wantHold = this._holdingLeft;     // sol tık basılı: dish modu
     this.me.holdPitch = this._orbitPitch;     // dish yüksekliği farenin dikey açısı
-    this.me.applyControl({ x: mx, z: mz }, rawIn.jump, dt, sfx);
+    // Servis tutuşu sırasında servisçi zıplayamaz (dish pozu bozulmasın)
+    const iAmServing = this._serveHold && this._serveHold.side === this.myTeam;
+    this.me.applyControl({ x: mx, z: mz }, rawIn.jump && !iAmServing, dt, sfx);
 
     if (this.bot) {
       const b = this.bot.update(dt);
-      this.chars[1].applyControl(b.move, b.jump, dt, null);
-      if (b.swing) this.chars[1].startSwing(); // bot artık vuruşu manuel tetikler
+      const botServing = this._serveHold && this._serveHold.side === this.botTeam;
+      const botChar = this.chars[this.botTeam];
+      botChar.applyControl(botServing ? { x: 0, z: 0 } : b.move, b.jump && !botServing, dt, null);
+      if (b.swing && !botServing) botChar.startSwing();
+    }
+
+    // SERVİS her zaman dish modunda: servisçinin diski raund başından itibaren düz
+    if (this._serveHold) {
+      const sc = this.chars[this._serveHold.side];
+      if (!sc.flopped && !sc.jumpTumble) {
+        sc.wantHold = true;
+        sc.holdPose = true;
+      }
     }
 
     for (const c of this.chars) c.applyNetTarget(dt);
@@ -401,22 +454,46 @@ export class Game {
     // 4) Görseller (raket fizik gövdeleri de burada görsele eşitlenir)
     const bp = this.ball.body.position;
     for (const c of this.chars) c.update(dt, bp, this._time);
-    if (this.authority) this._updateBallCradle(dt); // dish: topu diskte taşı/sektir
+    // Dish beşiği: authority tüm karakterler için, guest KENDİ karakteri için
+    // yerel tahmin yapar (lag'da dish'in kopmasını önler — mavi takım optimizasyonu)
+    this._updateBallCradle(dt);
     this.ball.update(dt);
     updateClouds(this.gfx.clouds, dt);
+    this.gfx.updateSun(dt); // güneş yavaşça döner, gölgeler değişir
 
-    // Serbest yörünge kamerası (GTA tarzı): oyuncunun etrafında fareyle döner
+    // Serbest yörünge kamerası (GTA tarzı) + spring-arm: kamera oyuncudan istenen
+    // yöne uzanır ama tel kafese denk gelirse mesafesini kısaltıp ASLA sınırı geçmez.
     const mp = this.me.body.position;
     const cosP = Math.cos(this._orbitPitch);
+    const dx = Math.sin(this._orbitYaw) * cosP;
+    const dy = Math.sin(this._orbitPitch);
+    const dz = Math.cos(this._orbitYaw) * cosP;
+    // Kafes içi kutu (telden biraz içeride) — kamera bu kutunun dışına çıkamaz
+    const bx = COURT.wallX - 0.3, bz = COURT.wallZ - 0.3, byTop = COURT.ceilY - 0.3;
+    let maxD = this._orbitDist;
+    if (dx > 1e-3) maxD = Math.min(maxD, (bx - mp.x) / dx);
+    else if (dx < -1e-3) maxD = Math.min(maxD, (-bx - mp.x) / dx);
+    if (dz > 1e-3) maxD = Math.min(maxD, (bz - mp.z) / dz);
+    else if (dz < -1e-3) maxD = Math.min(maxD, (-bz - mp.z) / dz);
+    if (dy > 1e-3) maxD = Math.min(maxD, (byTop - mp.y) / dy);
+    maxD = Math.max(0.4, maxD); // duvara sıkışsa bile çok az bir mesafe kalsın
     this._camPos.set(
-      mp.x + Math.sin(this._orbitYaw) * cosP * this._orbitDist,
-      Math.max(0.6, mp.y + Math.sin(this._orbitPitch) * this._orbitDist),
-      mp.z + Math.cos(this._orbitYaw) * cosP * this._orbitDist
+      mp.x + dx * maxD,
+      Math.max(0.7, mp.y + dy * maxD),
+      mp.z + dz * maxD
     );
     this.gfx.camera.position.lerp(this._camPos, Math.min(1, 14 * dt));
     this._camLook.set(mp.x, mp.y + 1.35, mp.z);
     this._camTarget.lerp(this._camLook, Math.min(1, 18 * dt));
     this.gfx.camera.lookAt(this._camTarget);
+
+    // Kamera oyuncuya yaklaşınca (duvara sıkışınca) KENDİ karakterini/raketini soldur ki
+    // görüşü kapatmasın. Yalnızca yerel görünüm — rakip seni normal görür.
+    // Tam mesafe (8.5) = tam görünür; kamera kısalmaya başlayınca kademeli solar.
+    const cpos = this.gfx.camera.position;
+    const camDist = Math.hypot(cpos.x - mp.x, cpos.y - (mp.y + 0.6), cpos.z - mp.z);
+    // En fazla %90 saydamlaşır (opaklık tabanı 0.1 — oyuncu tamamen kaybolmasın)
+    this.me.setOpacity(clamp((camDist - 2.0) / (7.0 - 2.0), 0.1, 1));
 
     // Raket fırlatma nişanı: yörünge önizlemesi
     if (this._aiming && this.me.racketState === 'held' && !this.me.flopped && !this.me.holdPose) {
@@ -544,7 +621,6 @@ export class Game {
 
   _announcePoint(scorer, landSide) {
     this.ui.updateScore(this.scores);
-    this.ui.showMsg(`SAYI! ${TEAM_NAMES[scorer]} 🎉`, 2600);
     sfx.whistle();
     if (scorer === this.myTeam) sfx.score();
     else sfx.concede();
@@ -556,19 +632,28 @@ export class Game {
 
   _resetRound(serveSide, isFirst) {
     if (this.state === 'end') return;
+    // Oyuncular ARKA ÇİZGİDE dizilir
     for (const c of this.chars) c.resetPose(c.side * PLAYER.spawnX, 0);
-    this.ball.reset(SIDE_SIGN[serveSide] * BALL.serveX, BALL.serveHeight, 0);
+    // SERVİS: top yukarıdan düşmez — doğrudan servisçinin diskinde hazır durur.
+    // Servisçi dish modundadır; yön verip sol tıkla başlar (3.5 sn'de otomatik).
+    const sc = this.chars[serveSide];
+    sc._cradleT = 0;
+    sc._cradleReleaseUntil = 0;
+    const spot = sc.prepareServeDish(this._cradlePos);
+    this.ball.reset(spot.x, spot.y, spot.z);
+    this._serveHold = { side: serveSide, until: null };
+    // Her serviste kamera sıfırlanır (arkaya dönük unutulmasın)
+    this._orbitYaw = SIDE_SIGN[this.myTeam] * Math.PI / 2;
+    this._orbitPitch = 0.42;
     this.roundActive = true;
     this.ui.updateScore(this.scores);
-    this.ui.showMsg(
-      isFirst ? 'Maç başlıyor! 🏐' : `Servis: ${TEAM_NAMES[serveSide]}`,
-      1500
-    );
+    if (isFirst) this.ui.showMsg('Maç başlıyor! 🏓', 1500);
   }
 
   _matchEnd(winner) {
     this.state = 'end';
     this.roundActive = false;
+    this._serveHold = null;
     this._sendEvent({ type: 'matchEnd', winner, scores: [...this.scores] });
     this._showEnd(winner);
   }
@@ -718,6 +803,7 @@ export class Game {
       case 'matchEnd':
         if (!this.authority) {
           this.scores = [...d.scores];
+          this._serveHold = null; // maç sonu ekranında dish zorlaması kalmasın
           this.ui.updateScore(this.scores);
           this._showEnd(d.winner);
         }
@@ -741,6 +827,23 @@ export class Game {
         const remote = this.chars[1 - this.myTeam];
         if (finiteArr(d.dir, 3) && remote) {
           remote.throwRacket(this._throwVec.set(d.dir[0], d.dir[1], d.dir[2]));
+        }
+        break;
+      }
+      case 'serveShoot': {
+        // Guest servis attı: host onun karakteri için servisi başlat
+        if (this.authority && this._serveHold && this._serveHold.side !== this.myTeam) {
+          this._serveLaunch(this.chars[this._serveHold.side]);
+        }
+        break;
+      }
+      case 'serveDone': {
+        if (!this.authority) {
+          this._serveHold = null;
+          // Host servisi başlattı: yerel beşik topu sabitlemeye devam etmesin
+          // (kısa süre yakalama kapalı — top serbestçe uçsun, snapshot'lar yönetsin)
+          this.me._cradleT = 0;
+          this.me._cradleReleaseUntil = this._time + 0.6;
         }
         break;
       }

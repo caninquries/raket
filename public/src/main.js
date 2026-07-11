@@ -12,7 +12,6 @@ const el = {
   menu: $('menu'),
   menuStatus: $('menu-status'),
   playerName: $('player-name'),
-  nameId: $('name-id'),
   btnSingle: $('btn-single'),
   btnQuick: $('btn-quick'),
   btnRoom: $('btn-room'),
@@ -46,8 +45,7 @@ function getPlayerId() {
   }
   return id;
 }
-const PLAYER_ID = getPlayerId();
-el.nameId.textContent = 'ID: ' + PLAYER_ID;
+const PLAYER_ID = getPlayerId(); // görünmez ama online eşleşmede kullanılır
 
 try {
   const saved = localStorage.getItem('kv_name');

@@ -22,7 +22,7 @@ export function createPhysics() {
   world.defaultContactMaterial.restitution = 0.2;
 
   world.addContactMaterial(new CANNON.ContactMaterial(mats.ground, mats.ball, { friction: 0.3, restitution: 0.8 }));
-  world.addContactMaterial(new CANNON.ContactMaterial(mats.wall, mats.ball, { friction: 0.1, restitution: 0.95 }));
+  world.addContactMaterial(new CANNON.ContactMaterial(mats.wall, mats.ball, { friction: 0.1, restitution: 0.9 }));
   world.addContactMaterial(new CANNON.ContactMaterial(mats.racket, mats.ball, { friction: 0.25, restitution: RACKET.restitution }));
   world.addContactMaterial(new CANNON.ContactMaterial(mats.net, mats.ball, { friction: 0.2, restitution: 0.4 }));
   world.addContactMaterial(new CANNON.ContactMaterial(mats.player, mats.ball, { friction: 0.1, restitution: 0.1 }));

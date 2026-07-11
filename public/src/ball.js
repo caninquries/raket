@@ -15,6 +15,9 @@ export class Ball {
     this.squash = 0;
     this._lastBounceSfx = 0;
     this.onGround = null; // (side) => void — top yere değince
+    this._distSinceHit = 0; // son vuruştan bu yana gidilen yol (sınır sekmesi için)
+    this._prevSpeed = 0;
+    this._pendingWallDamp = null; // {nx,ny,nz,factor} — çarpma sonrası sekme sönümü
 
     this.body = new CANNON.Body({
       mass: BALL.mass,
@@ -40,10 +43,10 @@ export class Ball {
     this.mesh.castShadow = true;
     scene.add(this.mesh);
 
-    // İniş göstergesi — topun altında beyaz halka
+    // İniş göstergesi — topun düşeceği yerde BEYAZ halka
     this.ring = new THREE.Mesh(
-      new THREE.RingGeometry(BALL.radius * 0.62, BALL.radius * 0.93, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthWrite: false })
+      new THREE.RingGeometry(BALL.radius * 0.6, BALL.radius * 0.98, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthWrite: false })
     );
     this.ring.rotation.x = -Math.PI / 2;
     this.ring.position.y = 0.015;
@@ -106,6 +109,15 @@ export class Ball {
       } else if (tag === 'wall') {
         if (impact > 2.5 && now - this._lastBounceSfx > 150) { sfx.wall(); this._lastBounceSfx = now; }
         this._spawnWallFx(other.wallInfo, now);
+        // Mesafeye bağlı sekme: son vuruştan uzağa geldiyse sekmeyi kes.
+        // Sönümü fizik ADIMINDAN SONRA (update) uygularız ki solver'ı bozmasın.
+        if (other.wallInfo) {
+          const d = this._distSinceHit;
+          const t = clamp((d - BALL.wallCloseDist) / (BALL.wallFarDist - BALL.wallCloseDist), 0, 1);
+          const factor = BALL.wallBounceNear + (BALL.wallBounceFar - BALL.wallBounceNear) * t;
+          const n = other.wallInfo.normal;
+          this._pendingWallDamp = { nx: n[0], ny: n[1], nz: n[2], factor };
+        }
       } else if (tag === 'racket') {
         this.squash = Math.max(this.squash, Math.min(1, impact / 10));
         if (impact > 2 && now - this._lastBounceSfx > 120) { sfx.racket(); this._lastBounceSfx = now; }
@@ -177,6 +189,25 @@ export class Ball {
   }
 
   update(dt) {
+    const v = this.body.velocity;
+
+    // Sınır çarpma sönümü (fizik adımından sonra): sekmenin dik bileşenini azalt
+    if (this._pendingWallDamp) {
+      const w = this._pendingWallDamp;
+      this._pendingWallDamp = null;
+      const vn = v.x * w.nx + v.y * w.ny + v.z * w.nz; // dik hız (içeri = +)
+      if (vn > 0) {
+        const dv = vn * (w.factor - 1); // dik bileşeni factor kadar ölçekle
+        v.x += w.nx * dv; v.y += w.ny * dv; v.z += w.nz * dv;
+      }
+    }
+
+    // Son vuruştan bu yana gidilen yolu izle; ani hız artışı = yeni vuruş -> sıfırla
+    const speed = v.length();
+    if (speed > this._prevSpeed + 3) this._distSinceHit = 0;
+    else this._distSinceHit += speed * dt;
+    this._prevSpeed = speed;
+
     // Vuruş izi: top hızlıyken (>6) yol boyunca halka bırak, sonra hepsini yaşlandır
     this._hitGlow = Math.max(0, this._hitGlow - dt);
     _trailVel.set(this.body.velocity.x, this.body.velocity.y, this.body.velocity.z);
@@ -238,8 +269,8 @@ export class Ball {
       this.ring.position.x = this.body.position.x;
       this.ring.position.z = this.body.position.z;
       const t = Math.min(1, (h - 0.5) / 8);
-      this.ring.material.opacity = 0.2 + 0.4 * t;
-      const s = 0.7 + 0.5 * t;
+      this.ring.material.opacity = 0.45 + 0.4 * t; // belirgin kırmızı
+      const s = 0.75 + 0.55 * t;
       this.ring.scale.set(s, s, 1);
     }
   }
@@ -249,7 +280,14 @@ export class Ball {
     this.body.velocity.set(0, 0, 0);
     this.body.angularVelocity.set((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2);
     this.squash = 0;
+    this._distSinceHit = 0;
+    this._prevSpeed = 0;
+    this._pendingWallDamp = null;
   }
+}
+
+function clamp(v, a, b) {
+  return Math.max(a, Math.min(b, v));
 }
 
 // Plaj topu dokusu — renkli dikey panolar
